@@ -1,0 +1,186 @@
+export const dynamic = 'force-dynamic';
+
+function getCredentials(body = {}) {
+  const sanitize = (val) => {
+    if (!val || val === "undefined" || val === "null" || val.trim() === "") {
+      return null;
+    }
+    return val;
+  };
+
+  const appKey = sanitize(body.appKey) || process.env.VTEX_API_APP_KEY;
+  const appToken = sanitize(body.appToken) || process.env.VTEX_API_APP_TOKEN;
+  const account = sanitize(body.account) || process.env.VTEX_APCCOUNT || process.env.VTEX_ACCOUNT;
+  const environment = sanitize(body.environment) || process.env.VTEX_ENVIROMENT || process.env.VTEX_ENVIRONMENT || 'vtexcommercestable';
+
+  return { appKey, appToken, account, environment };
+}
+
+// GET: Check hook config in VTEX
+export async function GET(request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const bodyCreds = {
+      appKey: searchParams.get('appKey'),
+      appToken: searchParams.get('appToken'),
+      account: searchParams.get('account'),
+      environment: searchParams.get('environment'),
+    };
+    
+    const { appKey, appToken, account, environment } = getCredentials(bodyCreds);
+
+    if (!appKey || !appToken || !account) {
+      return new Response(JSON.stringify({ 
+        status: "unconfigured",
+        message: "Credentials missing or incomplete. Add them to .env"
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // Call the direct portal endpoint for reliability
+    const vtexUrl = `https://${account}.${environment}.com.br/api/orders/hook/config`;
+    console.log(`Checking VTEX hook configuration at: ${vtexUrl}`);
+
+    const response = await fetch(vtexUrl, {
+      method: 'GET',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'X-VTEX-API-AppKey': appKey,
+        'X-VTEX-API-AppToken': appToken,
+      },
+    });
+
+    if (response.status === 404) {
+      return new Response(JSON.stringify({
+        status: "not_found",
+        message: "No active hook configuration found in VTEX"
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return new Response(JSON.stringify({
+        status: "error",
+        message: `VTEX API returned error: ${response.status}`,
+        details: errorText
+      }), {
+        status: response.status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const data = await response.json();
+    return new Response(JSON.stringify({
+      status: "configured",
+      config: data
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  } catch (err) {
+    console.error("Error checking hook:", err);
+    return new Response(JSON.stringify({ error: "Internal Server Error", message: err.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+}
+
+// POST: Create or update hook config in VTEX
+export async function POST(request) {
+  try {
+    const body = await request.json();
+    const { targetUrl } = body;
+    const { appKey, appToken, account, environment } = getCredentials(body);
+
+    if (!targetUrl) {
+      return new Response(JSON.stringify({ error: "targetUrl is required" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    if (!appKey || !appToken || !account) {
+      return new Response(JSON.stringify({ error: "VTEX credentials are required (check .env or pass as parameter)" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    // Call the direct portal endpoint for reliability
+    const vtexUrl = `https://${account}.${environment}.com.br/api/orders/hook/config`;
+    console.log(`Configuring VTEX hook at: ${vtexUrl} with targetUrl: ${targetUrl}`);
+
+    const payload = {
+      filter: {
+        type: "FromWorkflow",
+        status: [
+          "waiting-for-sellers-confirmation",
+          "payment-pending",
+          "payment-approved",
+          "request-cancel",
+          "canceled",
+          "ready-for-handling",
+          "handling",
+          "invoiced"
+        ]
+      },
+      hook: {
+        url: targetUrl,
+        headers: {
+          "X-VTEX-Webhook-Source": "update-order-app"
+        }
+      }
+    };
+
+    const response = await fetch(vtexUrl, {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'X-VTEX-API-AppKey': appKey,
+        'X-VTEX-API-AppToken': appToken,
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return new Response(JSON.stringify({
+        error: `VTEX Hook setup failed: ${response.status}`,
+        details: errorText
+      }), {
+        status: response.status,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    let responseData = { status: "registered" };
+    try {
+      responseData = await response.json();
+    } catch (e) {}
+
+    return new Response(JSON.stringify({
+      status: "success",
+      message: "Webhook configured successfully on VTEX",
+      vtexResponse: responseData
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+
+  } catch (err) {
+    console.error("Error setting up hook:", err);
+    return new Response(JSON.stringify({ error: "Internal Server Error", message: err.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+}
