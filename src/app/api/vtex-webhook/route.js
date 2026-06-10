@@ -6,12 +6,21 @@ if (!global.sseClients) {
 
 export async function POST(request) {
   try {
-    const body = await request.json();
+    let body = {};
+    try {
+      const text = await request.text();
+      if (text && text.trim()) {
+        body = JSON.parse(text);
+      }
+    } catch (e) {
+      console.warn("Failed to parse request body as JSON:", e.message);
+    }
+
     console.log("Received webhook payload:", JSON.stringify(body, null, 2));
 
-    // Handle handshake ping
-    if (body && body.hookConfig === "ping") {
-      console.log("Responding to VTEX configuration ping");
+    // Handle handshake ping / test / empty request
+    if (!body || body.hookConfig === "ping" || body.config === "ping" || Object.keys(body).length === 0) {
+      console.log("Responding to VTEX configuration ping / test request");
       return new Response(JSON.stringify({ status: "ok", message: "pong" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -26,9 +35,9 @@ export async function POST(request) {
     const origin = body.Origin || body.origin || { Account: "unknown", Key: "unknown" };
 
     if (!orderId || !state) {
-      console.warn("Invalid webhook payload received: missing OrderId or State");
-      return new Response(JSON.stringify({ error: "Invalid payload, OrderId and State are required" }), {
-        status: 400,
+      console.warn("Webhook payload missing OrderId or State - ignoring but returning 200 to keep hook alive");
+      return new Response(JSON.stringify({ status: "ignored", message: "Missing OrderId or State" }), {
+        status: 200,
         headers: { "Content-Type": "application/json" },
       });
     }
@@ -69,8 +78,9 @@ export async function POST(request) {
     });
   } catch (err) {
     console.error("Error processing VTEX webhook:", err);
-    return new Response(JSON.stringify({ error: "Internal Server Error", message: err.message }), {
-      status: 500,
+    // Return 200 to keep VTEX from disabling the hook due to errors
+    return new Response(JSON.stringify({ status: "error", message: err.message }), {
+      status: 200,
       headers: { "Content-Type": "application/json" },
     });
   }
