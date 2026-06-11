@@ -11,6 +11,9 @@ export default function Home() {
     desktopNotifications: false,
   });
 
+  // Keep track of browser notification permission state
+  const [permissionState, setPermissionState] = useState("default");
+
   const [setupForm, setSetupForm] = useState({
     targetUrl: "",
     appKey: "",
@@ -88,14 +91,19 @@ export default function Home() {
     }
   };
 
-  // Trigger desktop push notification
+  // Trigger desktop push notification (integrates with OS Notification Center)
   const triggerNotification = (orderId, state) => {
     if (!preferences.desktopNotifications) return;
     if ("Notification" in window && Notification.permission === "granted") {
-      new Notification(`VTEX Order Updated!`, {
-        body: `Order #${orderId} is now: ${state.toUpperCase()}`,
-        icon: "/favicon.ico",
-      });
+      try {
+        new Notification(`VTEX: Orden Actualizada`, {
+          body: `La orden #${orderId} cambió al estado: ${state.toUpperCase()}`,
+          icon: "/favicon.ico",
+          silent: true, // Let the synthesized Web Audio chime handle the audio to avoid duplicate sounds
+        });
+      } catch (err) {
+        console.error("Failed to trigger push notification:", err);
+      }
     }
   };
 
@@ -172,7 +180,7 @@ export default function Home() {
           targetUrl: data.config?.hook?.url || prev.targetUrl,
         }));
         addLog("Loaded existing VTEX hook configuration", "success");
-        return true; // Credentials configured
+        return true; 
       } else if (data.status === "unconfigured") {
         setSetupStatus({
           status: "unconfigured",
@@ -185,7 +193,7 @@ export default function Home() {
           message: "No active hook configured in this account",
           config: null
         });
-        return true; // Credentials configured but hook is empty
+        return true; 
       } else {
         setSetupStatus({
           status: "error",
@@ -215,7 +223,6 @@ export default function Home() {
     addLog(`Fetching orders from VTEX for range: ${dateFilter.startDate} to ${dateFilter.endDate}...`, "info");
 
     try {
-      // Build parameters cleanly (avoid sending empty string values that overwrite env vars in backend)
       const params = {
         startDate: dateFilter.startDate,
         endDate: dateFilter.endDate,
@@ -319,7 +326,7 @@ export default function Home() {
       if (response.ok) {
         addLog(`Simulation successful! Payload received.`, "success");
       } else {
-        addLog(`Simulation failed: ${response.statusText}`, "danger");
+        addLog("Simulation failed", "danger");
       }
     } catch (err) {
       addLog(`Simulation error: ${err.message}`, "danger");
@@ -328,19 +335,30 @@ export default function Home() {
     }
   };
 
+  // Request browser notification permission explicitly
+  const enableNotifications = async () => {
+    if (!("Notification" in window)) {
+      alert("This browser does not support desktop notifications.");
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    setPermissionState(permission);
+    
+    if (permission === "granted") {
+      setPreferences((prev) => ({ ...prev, desktopNotifications: true }));
+      addLog("Desktop push notifications enabled", "success");
+    } else {
+      setPreferences((prev) => ({ ...prev, desktopNotifications: false }));
+      addLog("Push notifications permission denied by user", "warning");
+    }
+  };
+
   // Request desktop notification permission on toggle
   const handleNotificationToggle = async (e) => {
     const checked = e.target.checked;
     if (checked) {
-      const permission = await Notification.requestPermission();
-      if (permission === "granted") {
-        setPreferences((prev) => ({ ...prev, desktopNotifications: true }));
-        addLog("Desktop notifications enabled", "success");
-      } else {
-        setPreferences((prev) => ({ ...prev, desktopNotifications: false }));
-        addLog("Notification permission denied by browser", "warning");
-        e.target.checked = false;
-      }
+      await enableNotifications();
     } else {
       setPreferences((prev) => ({ ...prev, desktopNotifications: false }));
       addLog("Desktop notifications disabled", "info");
@@ -356,6 +374,14 @@ export default function Home() {
         fetchVTEXOrders(true);
       }
     });
+
+    // Check actual notification permission on startup
+    if ("Notification" in window) {
+      setPermissionState(Notification.permission);
+      if (Notification.permission === "granted") {
+        setPreferences((prev) => ({ ...prev, desktopNotifications: true }));
+      }
+    }
 
     return () => {
       if (eventSourceRef.current) {
@@ -416,6 +442,33 @@ export default function Home() {
           </button>
         </div>
       </header>
+
+      {/* Proactive Notification Banner */}
+      {permissionState === "default" && (
+        <div 
+          className="glass-panel" 
+          style={{ 
+            padding: "14px 24px", 
+            display: "flex", 
+            justifyContent: "space-between", 
+            alignItems: "center", 
+            background: "linear-gradient(135deg, rgba(78, 205, 196, 0.1) 0%, rgba(58, 134, 255, 0.1) 100%)",
+            border: "1px dashed var(--accent-cyan)",
+            borderRadius: "12px",
+            animation: "pulse-cyan 3s infinite"
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <span style={{ fontSize: "20px" }}>🔔</span>
+            <span style={{ fontSize: "13px", color: "#fff", fontWeight: "500" }}>
+              ¿Quieres recibir alertas visuales en tu pantalla (Windows/Mac/Linux) cuando cambie una orden, incluso si el navegador está cerrado o en segundo plano?
+            </span>
+          </div>
+          <button onClick={enableNotifications} className="btn" style={{ padding: "6px 14px", fontSize: "12px" }}>
+            Activar Notificaciones
+          </button>
+        </div>
+      )}
 
       {/* Main Dashboard Panel */}
       <div className="dashboard-grid">
