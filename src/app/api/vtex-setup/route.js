@@ -190,12 +190,19 @@ export async function POST(request) {
       responseData = await response.json();
     } catch (e) {}
 
-    await saveLocalHookConfig({
-      targetUrl,
-      hookdeckApiKey,
-      account,
-      environment
-    });
+    let localConfigSaved = true;
+
+    try {
+      await saveLocalHookConfig({
+        targetUrl,
+        hookdeckApiKey,
+        account,
+        environment
+      });
+    } catch (err) {
+      localConfigSaved = false;
+      console.error("Failed to save local hook config:", err);
+    }
 
     return new Response(JSON.stringify({
       status: "success",
@@ -203,7 +210,8 @@ export async function POST(request) {
       vtexResponse: responseData,
       localConfig: {
         targetUrl,
-        hasHookdeckApiKey: Boolean(hookdeckApiKey)
+        hasHookdeckApiKey: Boolean(hookdeckApiKey),
+        saved: localConfigSaved
       }
     }), {
       status: 200,
