@@ -1,3 +1,5 @@
+import { readLocalHookConfig, saveLocalHookConfig } from "@/lib/local-hook-config";
+
 export const dynamic = 'force-dynamic';
 
 function getCredentials(body = {}) {
@@ -20,6 +22,7 @@ function getCredentials(body = {}) {
 export async function GET(request) {
   try {
     const { searchParams } = new URL(request.url);
+    const localHookConfig = await readLocalHookConfig();
     const bodyCreds = {
       appKey: searchParams.get('appKey'),
       appToken: searchParams.get('appToken'),
@@ -32,7 +35,11 @@ export async function GET(request) {
     if (!appKey || !appToken || !account) {
       return new Response(JSON.stringify({ 
         status: "unconfigured",
-        message: "Credentials missing or incomplete. Add them to .env"
+        message: "Credentials missing or incomplete. Add them to .env",
+        localConfig: {
+          targetUrl: localHookConfig.targetUrl || null,
+          hasHookdeckApiKey: Boolean(localHookConfig.hookdeckApiKey)
+        }
       }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -56,7 +63,11 @@ export async function GET(request) {
     if (response.status === 404) {
       return new Response(JSON.stringify({
         status: "not_found",
-        message: "No active hook configuration found in VTEX"
+        message: "No active hook configuration found in VTEX",
+        localConfig: {
+          targetUrl: localHookConfig.targetUrl || null,
+          hasHookdeckApiKey: Boolean(localHookConfig.hookdeckApiKey)
+        }
       }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -78,7 +89,11 @@ export async function GET(request) {
     const data = await response.json();
     return new Response(JSON.stringify({
       status: "configured",
-      config: data
+      config: data,
+      localConfig: {
+        targetUrl: localHookConfig.targetUrl || null,
+        hasHookdeckApiKey: Boolean(localHookConfig.hookdeckApiKey)
+      }
     }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
@@ -99,6 +114,8 @@ export async function POST(request) {
     const body = await request.json();
     const { targetUrl } = body;
     const { appKey, appToken, account, environment } = getCredentials(body);
+    const localHookConfig = await readLocalHookConfig();
+    const hookdeckApiKey = body.hookdeckApiKey?.trim() || localHookConfig.hookdeckApiKey || null;
 
     if (!targetUrl) {
       return new Response(JSON.stringify({ error: "targetUrl is required" }), {
@@ -118,6 +135,14 @@ export async function POST(request) {
     const vtexUrl = `https://${account}.${environment}.com.br/api/orders/hook/config`;
     console.log(`Configuring VTEX hook at: ${vtexUrl} with targetUrl: ${targetUrl}`);
 
+    const hookHeaders = {
+      "X-VTEX-Webhook-Source": "update-order-app"
+    };
+
+    if (hookdeckApiKey) {
+      hookHeaders["api-key"] = hookdeckApiKey;
+    }
+
     const payload = {
       filter: {
         type: "FromWorkflow",
@@ -134,9 +159,7 @@ export async function POST(request) {
       },
       hook: {
         url: targetUrl,
-        headers: {
-          "X-VTEX-Webhook-Source": "update-order-app"
-        }
+        headers: hookHeaders
       }
     };
 
@@ -167,10 +190,21 @@ export async function POST(request) {
       responseData = await response.json();
     } catch (e) {}
 
+    await saveLocalHookConfig({
+      targetUrl,
+      hookdeckApiKey,
+      account,
+      environment
+    });
+
     return new Response(JSON.stringify({
       status: "success",
       message: "Webhook configured successfully on VTEX",
-      vtexResponse: responseData
+      vtexResponse: responseData,
+      localConfig: {
+        targetUrl,
+        hasHookdeckApiKey: Boolean(hookdeckApiKey)
+      }
     }), {
       status: 200,
       headers: { "Content-Type": "application/json" },

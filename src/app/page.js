@@ -20,6 +20,7 @@ export default function Home() {
     appToken: "",
     account: "",
     environment: "vtexcommercestable",
+    hookdeckApiKey: "",
   });
 
   const [setupStatus, setSetupStatus] = useState({
@@ -177,7 +178,7 @@ export default function Home() {
         });
         setSetupForm((prev) => ({
           ...prev,
-          targetUrl: data.config?.hook?.url || prev.targetUrl,
+          targetUrl: data.config?.hook?.url || data.localConfig?.targetUrl || prev.targetUrl,
         }));
         addLog("Loaded existing VTEX hook configuration", "success");
         return true; 
@@ -187,12 +188,24 @@ export default function Home() {
           message: "Credentials missing or incomplete. Add them to .env",
           config: null
         });
+        if (data.localConfig?.targetUrl) {
+          setSetupForm((prev) => ({
+            ...prev,
+            targetUrl: data.localConfig.targetUrl,
+          }));
+        }
       } else if (data.status === "not_found") {
         setSetupStatus({
           status: "not_found",
           message: "No active hook configured in this account",
           config: null
         });
+        if (data.localConfig?.targetUrl) {
+          setSetupForm((prev) => ({
+            ...prev,
+            targetUrl: data.localConfig.targetUrl,
+          }));
+        }
         return true; 
       } else {
         setSetupStatus({
@@ -667,6 +680,20 @@ export default function Home() {
                 />
                 <span style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "2px" }}>
                   Must be a public HTTPS URL (like an Ngrok tunnel) pointing to /api/vtex-webhook.
+                </span>
+              </div>
+
+              <div className="form-group">
+                <label>HookDeck API Key</label>
+                <input
+                  type="password"
+                  className="form-control"
+                  placeholder="api-key header value for HookDeck"
+                  value={setupForm.hookdeckApiKey}
+                  onChange={(e) => setSetupForm((p) => ({ ...p, hookdeckApiKey: e.target.value }))}
+                />
+                <span style={{ fontSize: "10px", color: "var(--text-muted)", marginTop: "2px" }}>
+                  Optional. If provided, VTEX will send it as the api-key header when posting to HookDeck.
                 </span>
               </div>
 
